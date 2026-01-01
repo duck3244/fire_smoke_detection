@@ -72,16 +72,12 @@ fire_smoke_detection/
 
 #### 로컬 환경
 ```bash
-# 1. 저장소 클론
-git clone https://github.com/your-username/fire-smoke-detection.git
-cd fire-smoke-detection
-
-# 2. 가상환경 생성 (권장)
+# 1. 가상환경 생성 (권장)
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # venv\Scripts\activate   # Windows
 
-# 3. 원클릭 실행
+# 2. 원클릭 실행
 python main.py --mode full --download quick --api-key YOUR_API_KEY --epochs 50
 ```
 
@@ -412,3 +408,5 @@ datasets/fire/
     ├── images/
     └── labels/
 ```
+
+---
