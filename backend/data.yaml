@@ -1,0 +1,8 @@
+path: /home/duck/PycharmProjects/fire_smoke_detection/datasets/fire
+train: train/images
+val: valid/images
+test: test/images
+nc: 2
+names:
+- Fire
+- smoke

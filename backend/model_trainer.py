@@ -5,10 +5,13 @@ YOLOv8 화재 및 연기 감지 모델 훈련 모듈
 
 import os
 import time
+import logging
 import torch
 from pathlib import Path
 from ultralytics import YOLO
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class ModelTrainer:
     """모델 훈련 클래스"""
@@ -21,24 +24,24 @@ class ModelTrainer:
         
     def load_model(self, pretrained=True):
         """모델 로드"""
-        print(f"=== {self.model_size} 모델 로드 ===")
+        logger.info(f"=== {self.model_size} 모델 로드 ===")
         
         try:
             if pretrained:
                 # 사전 훈련된 모델 로드
                 self.model = YOLO(self.model_size)
-                print(f"✅ 사전 훈련된 {self.model_size} 모델 로드 완료")
+                logger.info(f"✅ 사전 훈련된 {self.model_size} 모델 로드 완료")
             else:
                 # 빈 모델 로드 (처음부터 훈련)
                 model_config = self.model_size.replace('.pt', '.yaml')
                 self.model = YOLO(model_config)
-                print(f"✅ 빈 {model_config} 모델 로드 완료")
+                logger.info(f"✅ 빈 {model_config} 모델 로드 완료")
             
             # 모델 정보 출력
-            print(f"모델 파라미터 수: {sum(p.numel() for p in self.model.model.parameters()):,}")
+            logger.info(f"모델 파라미터 수: {sum(p.numel() for p in self.model.model.parameters()):,}")
             
         except Exception as e:
-            print(f"❌ 모델 로드 실패: {e}")
+            logger.info(f"❌ 모델 로드 실패: {e}")
             return False
         
         return True
@@ -55,15 +58,15 @@ class ModelTrainer:
         """모델 훈련"""
         
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다. load_model()을 먼저 호출하세요.")
+            logger.info("❌ 모델이 로드되지 않았습니다. load_model()을 먼저 호출하세요.")
             return None
         
-        print("=== 모델 훈련 시작 ===")
-        print(f"데이터: {data_yaml}")
-        print(f"에포크: {epochs}")
-        print(f"배치 크기: {batch_size}")
-        print(f"이미지 크기: {image_size}")
-        print(f"디바이스: {'GPU' if torch.cuda.is_available() else 'CPU'}")
+        logger.info("=== 모델 훈련 시작 ===")
+        logger.info(f"데이터: {data_yaml}")
+        logger.info(f"에포크: {epochs}")
+        logger.info(f"배치 크기: {batch_size}")
+        logger.info(f"이미지 크기: {image_size}")
+        logger.info(f"디바이스: {'GPU' if torch.cuda.is_available() else 'CPU'}")
         
         # 훈련 시작 시간 기록
         start_time = time.time()
@@ -92,8 +95,6 @@ class ModelTrainer:
                 box=7.5,  # 박스 손실 가중치
                 cls=0.5,  # 클래스 손실 가중치
                 dfl=1.5,  # DFL 손실 가중치
-                pose=12.0,  # 포즈 손실 가중치 (사용 안 함)
-                kobj=2.0,  # 키포인트 객체 손실 가중치 (사용 안 함)
                 label_smoothing=0.0,  # 라벨 스무딩
                 nbs=64,  # 정규화 배치 크기
                 hsv_h=0.015,  # HSV-Hue 증강
@@ -118,7 +119,7 @@ class ModelTrainer:
             minutes = int((training_time % 3600) // 60)
             seconds = int(training_time % 60)
             
-            print(f"\n✅ 훈련 완료! 소요 시간: {hours:02d}:{minutes:02d}:{seconds:02d}")
+            logger.info(f"\n✅ 훈련 완료! 소요 시간: {hours:02d}:{minutes:02d}:{seconds:02d}")
             
             # 최고 성능 모델 경로 저장
             self.best_model_path = os.path.join(
@@ -126,13 +127,13 @@ class ModelTrainer:
             )
             
             if os.path.exists(self.best_model_path):
-                print(f"최고 성능 모델 저장: {self.best_model_path}")
+                logger.info(f"최고 성능 모델 저장: {self.best_model_path}")
             
             # 훈련 결과 요약
             self._print_training_summary()
             
         except Exception as e:
-            print(f"❌ 훈련 중 오류 발생: {e}")
+            logger.info(f"❌ 훈련 중 오류 발생: {e}")
             return None
         
         return self.training_results
@@ -142,24 +143,28 @@ class ModelTrainer:
         if self.training_results is None:
             return
         
-        print("\n=== 훈련 결과 요약 ===")
+        logger.info("\n=== 훈련 결과 요약 ===")
         try:
             # 최종 메트릭 출력
             metrics = self.training_results.results_dict
             if metrics:
-                print(f"최종 mAP@0.5: {metrics.get('metrics/mAP50(B)', 'N/A'):.4f}")
-                print(f"최종 mAP@0.5:0.95: {metrics.get('metrics/mAP50-95(B)', 'N/A'):.4f}")
-                print(f"최종 Precision: {metrics.get('metrics/precision(B)', 'N/A'):.4f}")
-                print(f"최종 Recall: {metrics.get('metrics/recall(B)', 'N/A'):.4f}")
-        except:
-            print("메트릭 정보를 가져올 수 없습니다.")
+                def fmt(key):
+                    v = metrics.get(key)
+                    return f"{v:.4f}" if isinstance(v, (int, float)) else "N/A"
+
+                logger.info(f"최종 mAP@0.5: {fmt('metrics/mAP50(B)')}")
+                logger.info(f"최종 mAP@0.5:0.95: {fmt('metrics/mAP50-95(B)')}")
+                logger.info(f"최종 Precision: {fmt('metrics/precision(B)')}")
+                logger.info(f"최종 Recall: {fmt('metrics/recall(B)')}")
+        except Exception as e:
+            logger.info(f"메트릭 정보를 가져올 수 없습니다: {e}")
     
     def resume_training(self, checkpoint_path, epochs=None):
         """체크포인트에서 훈련 재개"""
-        print(f"=== 훈련 재개: {checkpoint_path} ===")
+        logger.info(f"=== 훈련 재개: {checkpoint_path} ===")
         
         if not os.path.exists(checkpoint_path):
-            print(f"❌ 체크포인트 파일을 찾을 수 없습니다: {checkpoint_path}")
+            logger.info(f"❌ 체크포인트 파일을 찾을 수 없습니다: {checkpoint_path}")
             return None
         
         try:
@@ -172,19 +177,19 @@ class ModelTrainer:
                 epochs=epochs  # None이면 원래 설정된 에포크까지 계속
             )
             
-            print("✅ 훈련 재개 완료!")
+            logger.info("✅ 훈련 재개 완료!")
             return resume_results
             
         except Exception as e:
-            print(f"❌ 훈련 재개 실패: {e}")
+            logger.info(f"❌ 훈련 재개 실패: {e}")
             return None
     
     def hyperparameter_tuning(self, space=None, iterations=100):
         """하이퍼파라미터 튜닝"""
-        print("=== 하이퍼파라미터 튜닝 시작 ===")
+        logger.info("=== 하이퍼파라미터 튜닝 시작 ===")
         
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다.")
+            logger.info("❌ 모델이 로드되지 않았습니다.")
             return None
         
         try:
@@ -219,11 +224,11 @@ class ModelTrainer:
                 device=0 if torch.cuda.is_available() else 'cpu'
             )
             
-            print("✅ 하이퍼파라미터 튜닝 완료!")
+            logger.info("✅ 하이퍼파라미터 튜닝 완료!")
             return tuning_results
             
         except Exception as e:
-            print(f"❌ 하이퍼파라미터 튜닝 실패: {e}")
+            logger.info(f"❌ 하이퍼파라미터 튜닝 실패: {e}")
             return None
     
     def export_model(self, format='onnx', **kwargs):
@@ -233,10 +238,10 @@ class ModelTrainer:
         elif self.model:
             model = self.model
         else:
-            print("❌ 내보낼 모델이 없습니다.")
+            logger.info("❌ 내보낼 모델이 없습니다.")
             return None
         
-        print(f"=== 모델을 {format} 형식으로 내보내기 ===")
+        logger.info(f"=== 모델을 {format} 형식으로 내보내기 ===")
         
         try:
             export_path = model.export(
@@ -244,31 +249,31 @@ class ModelTrainer:
                 imgsz=640,
                 **kwargs
             )
-            print(f"✅ 모델 내보내기 완료: {export_path}")
+            logger.info(f"✅ 모델 내보내기 완료: {export_path}")
             return export_path
             
         except Exception as e:
-            print(f"❌ 모델 내보내기 실패: {e}")
+            logger.info(f"❌ 모델 내보내기 실패: {e}")
             return None
     
     def get_model_info(self):
         """모델 정보 조회"""
         if self.model is None:
-            print("모델이 로드되지 않았습니다.")
+            logger.info("모델이 로드되지 않았습니다.")
             return None
         
-        print("=== 모델 정보 ===")
+        logger.info("=== 모델 정보 ===")
         try:
             # 모델 구조 정보
             total_params = sum(p.numel() for p in self.model.model.parameters())
             trainable_params = sum(p.numel() for p in self.model.model.parameters() if p.requires_grad)
             
-            print(f"총 파라미터 수: {total_params:,}")
-            print(f"훈련 가능한 파라미터 수: {trainable_params:,}")
-            print(f"모델 크기: {self.model_size}")
+            logger.info(f"총 파라미터 수: {total_params:,}")
+            logger.info(f"훈련 가능한 파라미터 수: {trainable_params:,}")
+            logger.info(f"모델 크기: {self.model_size}")
             
             # 레이어 정보
-            print(f"레이어 수: {len(list(self.model.model.modules()))}")
+            logger.info(f"레이어 수: {len(list(self.model.model.modules()))}")
             
             return {
                 'total_params': total_params,
@@ -277,7 +282,7 @@ class ModelTrainer:
             }
             
         except Exception as e:
-            print(f"모델 정보 조회 실패: {e}")
+            logger.info(f"모델 정보 조회 실패: {e}")
             return None
     
     def benchmark_model(self):
@@ -287,10 +292,10 @@ class ModelTrainer:
         elif self.model:
             model = self.model
         else:
-            print("❌ 벤치마크할 모델이 없습니다.")
+            logger.info("❌ 벤치마크할 모델이 없습니다.")
             return None
         
-        print("=== 모델 성능 벤치마크 ===")
+        logger.info("=== 모델 성능 벤치마크 ===")
         
         try:
             # 벤치마크 실행
@@ -301,11 +306,11 @@ class ModelTrainer:
                 device=0 if torch.cuda.is_available() else 'cpu'
             )
             
-            print("✅ 벤치마크 완료!")
+            logger.info("✅ 벤치마크 완료!")
             return benchmark_results
             
         except Exception as e:
-            print(f"❌ 벤치마크 실패: {e}")
+            logger.info(f"❌ 벤치마크 실패: {e}")
             return None
 
 class TrainingCallback:
@@ -331,11 +336,11 @@ class TrainingCallback:
         # 최고 성능 업데이트
         if fitness > self.best_fitness:
             self.best_fitness = fitness
-            print(f"🎉 새로운 최고 성능! Epoch {epoch}, Fitness: {fitness:.4f}")
+            logger.info(f"🎉 새로운 최고 성능! Epoch {epoch}, Fitness: {fitness:.4f}")
     
     def on_train_end(self, trainer):
         """훈련 종료 시 호출"""
-        print(f"훈련 완료! 최고 Fitness: {self.best_fitness:.4f}")
+        logger.info(f"훈련 완료! 최고 Fitness: {self.best_fitness:.4f}")
 
 def main():
     """모델 훈련 테스트"""
@@ -348,8 +353,9 @@ def main():
         trainer.get_model_info()
         
         # 훈련 실행 (예시)
-        print("\n훈련을 시작하려면 trainer.train()을 호출하세요.")
-        print("예: trainer.train(epochs=50, batch_size=8)")
+        logger.info("\n훈련을 시작하려면 trainer.train()을 호출하세요.")
+        logger.info("예: trainer.train(epochs=50, batch_size=8)")
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()

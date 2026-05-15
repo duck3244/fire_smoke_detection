@@ -4,20 +4,18 @@
 """
 
 import os
+import logging
+from pathlib import Path
+
 import torch
+import yaml
 
-# YAML 처리
-try:
-    import yaml
-except ImportError:
-    import subprocess
-    import sys
+logger = logging.getLogger(__name__)
 
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'PyYAML'])
-    import yaml
-
-# 현재 디렉토리 기준으로 모든 경로 설정
-CURRENT_DIR = os.getcwd()
+# config.py는 backend/ 내부에 위치. datasets/, runs/ 는 backend의 상위(레포 루트)에 둠.
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
+CURRENT_DIR = str(PROJECT_ROOT)
 
 
 class Config:
@@ -36,8 +34,8 @@ class Config:
     CONFIDENCE_THRESHOLD = 0.5
 
     # 클래스 설정
-    CLASS_NAMES = ['Fire', 'default', 'smoke']
-    NUM_CLASSES = 3
+    CLASS_NAMES = ['Fire', 'smoke']
+    NUM_CLASSES = 2
 
     # Roboflow 설정
     ROBOFLOW_CONFIG = {
@@ -69,43 +67,55 @@ class Config:
 
 def setup_environment():
     """환경 설정 및 확인"""
-    print("=== 환경 설정 확인 ===")
+    logger.info("=== 환경 설정 확인 ===")
 
     # GPU 확인
     gpu_available = torch.cuda.is_available()
-    print(f"GPU 사용 가능: {gpu_available}")
+    logger.info(f"GPU 사용 가능: {gpu_available}")
     if gpu_available:
-        print(f"GPU 모델: {torch.cuda.get_device_name(0)}")
-        print(f"GPU 메모리: {torch.cuda.get_device_properties(0).total_memory / 1024 ** 3:.2f}GB")
+        logger.info(f"GPU 모델: {torch.cuda.get_device_name(0)}")
+        logger.info(f"GPU 메모리: {torch.cuda.get_device_properties(0).total_memory / 1024 ** 3:.2f}GB")
 
     # 디렉토리 정보 출력
-    print(f"현재 작업 디렉토리: {os.getcwd()}")
-    print(f"HOME: {Config.HOME}")
-    print(f"데이터셋 경로: {Config.DATASET_BASE_PATH}")
+    logger.info(f"현재 작업 디렉토리: {os.getcwd()}")
+    logger.info(f"HOME: {Config.HOME}")
+    logger.info(f"데이터셋 경로: {Config.DATASET_BASE_PATH}")
 
     return gpu_available
 
 
 def mount_google_drive():
     """Google Drive 마운트 (로컬에서는 불필요)"""
-    print("로컬 환경에서는 Google Drive 마운트가 필요하지 않습니다.")
+    logger.info("로컬 환경에서는 Google Drive 마운트가 필요하지 않습니다.")
     return True
 
 
-def install_requirements():
-    """필수 패키지 설치"""
-    packages = ['ultralytics', 'roboflow', 'opencv-python', 'matplotlib', 'pillow', 'pyyaml']
+def check_requirements():
+    """필수 패키지 import 가능 여부 확인 (설치는 외부 환경에 위임)"""
+    required = {
+        'ultralytics': 'ultralytics',
+        'roboflow': 'roboflow',
+        'opencv-python': 'cv2',
+        'matplotlib': 'matplotlib',
+        'pillow': 'PIL',
+        'pyyaml': 'yaml',
+    }
 
-    import subprocess
-    import sys
-
-    for package in packages:
+    missing = []
+    for pkg, mod in required.items():
         try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', package],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f"✅ {package}")
-        except:
-            print(f"⚠️ {package} 설치 확인 필요")
+            __import__(mod)
+            logger.info(f"✅ {pkg}")
+        except ImportError:
+            logger.info(f"❌ {pkg} 미설치")
+            missing.append(pkg)
+
+    if missing:
+        logger.info("\n다음 명령으로 설치하세요:")
+        logger.info(f"  pip install {' '.join(missing)}")
+        logger.info("또는: pip install -r requirements.txt")
+
+    return not missing
 
 
 def create_directories():
@@ -126,16 +136,18 @@ def create_directories():
 
 
 def create_data_yaml():
-    """data.yaml 파일 생성"""
+    """data.yaml 파일 생성 (path 기반 상대 경로)"""
     # 디렉토리 먼저 생성
     create_directories()
 
     target_yaml = os.path.join(Config.HOME, 'data.yaml')
 
+    # Ultralytics는 path + 상대경로 형식을 권장
     data_config = {
-        'train': Config.get_dataset_paths()['train'],
-        'val': Config.get_dataset_paths()['val'],
-        'test': Config.get_dataset_paths()['test'],
+        'path': Config.DATASET_BASE_PATH,
+        'train': 'train/images',
+        'val': 'valid/images',
+        'test': 'test/images',
         'nc': Config.NUM_CLASSES,
         'names': Config.CLASS_NAMES
     }
@@ -143,7 +155,7 @@ def create_data_yaml():
     with open(target_yaml, 'w', encoding='utf-8') as f:
         yaml.dump(data_config, f, default_flow_style=False, allow_unicode=True)
 
-    print(f"✅ data.yaml 생성: {target_yaml}")
+    logger.info(f"✅ data.yaml 생성: {target_yaml}")
     return target_yaml
 
 
@@ -152,16 +164,16 @@ def verify_ultralytics():
     try:
         from ultralytics import YOLO
         model = YOLO('yolov8n.pt')
-        print("✅ YOLOv8 로드 성공")
+        logger.info("✅ YOLOv8 로드 성공")
         return True
     except Exception as e:
-        print(f"⚠️ YOLOv8 확인 필요: {e}")
+        logger.info(f"⚠️ YOLOv8 확인 필요: {e}")
         return False
 
 
 def initialize_project():
     """프로젝트 초기화"""
-    print("=== 간단한 프로젝트 초기화 ===")
+    logger.info("=== 간단한 프로젝트 초기화 ===")
 
     # 1. 환경 설정
     gpu_available = setup_environment()
@@ -170,8 +182,8 @@ def initialize_project():
     mount_google_drive()
 
     # 3. 패키지 설치 확인
-    print("패키지 확인 중...")
-    install_requirements()
+    logger.info("패키지 확인 중...")
+    check_requirements()
 
     # 4. YOLOv8 확인
     ultralytics_ok = verify_ultralytics()
@@ -179,7 +191,7 @@ def initialize_project():
     # 5. data.yaml 생성
     yaml_path = create_data_yaml()
 
-    print("\n✅ 초기화 완료!")
+    logger.info("\n✅ 초기화 완료!")
 
     return {
         'gpu_available': gpu_available,
@@ -189,4 +201,5 @@ def initialize_project():
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     initialize_project()

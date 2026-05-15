@@ -6,12 +6,15 @@ YOLOv8 화재 및 연기 감지 추론 엔진 모듈
 import os
 import cv2
 import time
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 import torch
 from ultralytics import YOLO
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 class InferenceEngine:
     """추론 엔진 클래스"""
@@ -23,13 +26,13 @@ class InferenceEngine:
         self.iou_threshold = iou_threshold
         self.class_names = Config.CLASS_NAMES
         self.colors = self._generate_colors()
+        self.device = 0 if torch.cuda.is_available() else 'cpu'
         
     def _generate_colors(self):
         """클래스별 색상 생성"""
         colors = {}
         color_palette = [
             (255, 0, 0),    # 빨간색 - Fire
-            (0, 255, 0),    # 초록색 - default
             (128, 128, 128) # 회색 - smoke
         ]
         
@@ -60,34 +63,34 @@ class InferenceEngine:
                     self.model_path = path
                     break
             else:
-                print("❌ 모델 파일을 찾을 수 없습니다.")
+                logger.info("❌ 모델 파일을 찾을 수 없습니다.")
                 return False
         
         try:
             self.model = YOLO(self.model_path)
-            print(f"✅ 모델 로드 완료: {self.model_path}")
-            
-            # GPU 사용 가능 시 GPU로 이동
+            logger.info(f"✅ 모델 로드 완료: {self.model_path}")
+
             if torch.cuda.is_available():
-                self.model.to('cuda')
-                print("🚀 GPU 가속 사용")
-            
+                logger.info(f"🚀 GPU 가속 사용 (device={self.device})")
+            else:
+                logger.info("ℹ️ CPU 추론 모드")
+
             return True
         except Exception as e:
-            print(f"❌ 모델 로드 실패: {e}")
+            logger.info(f"❌ 모델 로드 실패: {e}")
             return False
     
     def predict_image(self, image_path, save_result=True, show_result=True):
         """단일 이미지 추론"""
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다.")
+            logger.info("❌ 모델이 로드되지 않았습니다.")
             return None
         
         if not os.path.exists(image_path):
-            print(f"❌ 이미지 파일을 찾을 수 없습니다: {image_path}")
+            logger.info(f"❌ 이미지 파일을 찾을 수 없습니다: {image_path}")
             return None
         
-        print(f"=== 이미지 추론: {os.path.basename(image_path)} ===")
+        logger.info(f"=== 이미지 추론: {os.path.basename(image_path)} ===")
         
         try:
             # 추론 실행
@@ -95,6 +98,7 @@ class InferenceEngine:
                 source=image_path,
                 conf=self.confidence,
                 iou=self.iou_threshold,
+                device=self.device,
                 save=save_result,
                 show_labels=True,
                 show_conf=True,
@@ -119,16 +123,16 @@ class InferenceEngine:
             }
             
         except Exception as e:
-            print(f"❌ 추론 실패: {e}")
+            logger.info(f"❌ 추론 실패: {e}")
             return None
     
     def predict_batch(self, image_folder, output_folder=None):
         """배치 이미지 추론"""
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다.")
+            logger.info("❌ 모델이 로드되지 않았습니다.")
             return None
         
-        print(f"=== 배치 추론: {image_folder} ===")
+        logger.info(f"=== 배치 추론: {image_folder} ===")
         
         # 이미지 파일 찾기
         image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
@@ -141,10 +145,10 @@ class InferenceEngine:
             ])
         
         if not image_files:
-            print("❌ 처리할 이미지가 없습니다.")
+            logger.info("❌ 처리할 이미지가 없습니다.")
             return None
         
-        print(f"총 {len(image_files)}개 이미지 처리 예정")
+        logger.info(f"총 {len(image_files)}개 이미지 처리 예정")
         
         try:
             # 배치 추론 실행
@@ -152,6 +156,7 @@ class InferenceEngine:
                 source=image_folder,
                 conf=self.confidence,
                 iou=self.iou_threshold,
+                device=self.device,
                 save=True,
                 project=output_folder or 'batch_inference',
                 exist_ok=True
@@ -172,115 +177,118 @@ class InferenceEngine:
             return batch_results
             
         except Exception as e:
-            print(f"❌ 배치 추론 실패: {e}")
+            logger.info(f"❌ 배치 추론 실패: {e}")
             return None
     
-    def predict_video(self, video_path, output_path=None, show_live=False):
-        """비디오 추론"""
+    def predict_video(self, video_path, output_path=None, show_live=False,
+                      keep_detection_history=False):
+        """비디오 추론 (ultralytics stream 모드)
+
+        keep_detection_history=False(기본)면 프레임별 감지 결과는 카운트만 누적하고
+        메모리에 보관하지 않습니다. 긴 비디오에서 OOM을 방지합니다.
+        """
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다.")
+            logger.info("❌ 모델이 로드되지 않았습니다.")
             return None
-        
-        print(f"=== 비디오 추론: {os.path.basename(video_path)} ===")
-        
+
+        logger.info(f"=== 비디오 추론: {os.path.basename(video_path)} ===")
+
+        out = None
         try:
+            # 메타데이터 확보를 위한 임시 캡처
             cap = cv2.VideoCapture(video_path)
-            
             if not cap.isOpened():
-                print("❌ 비디오를 열 수 없습니다.")
+                logger.info("❌ 비디오를 열 수 없습니다.")
                 return None
-            
-            # 비디오 정보
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
+
+            fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            print(f"비디오 정보: {width}x{height}, {fps}FPS, {total_frames}프레임")
-            
-            # 출력 비디오 설정
+            cap.release()
+
+            logger.info(f"비디오 정보: {width}x{height}, {fps}FPS, {total_frames}프레임")
+
             if output_path:
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-            
+
             frame_count = 0
-            detection_history = []
-            
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
+            detections_total = 0
+            detection_frames = 0
+            detection_history = [] if keep_detection_history else None
+
+            # stream=True: 결과를 generator로 yield → 메모리 일정
+            stream = self.model.predict(
+                source=video_path,
+                conf=self.confidence,
+                iou=self.iou_threshold,
+                device=self.device,
+                stream=True,
+                verbose=False,
+            )
+
+            for result in stream:
                 frame_count += 1
-                
-                # 추론 실행
-                results = self.model.predict(
-                    source=frame,
-                    conf=self.confidence,
-                    iou=self.iou_threshold,
-                    verbose=False
-                )
-                
-                # 결과 그리기
-                annotated_frame = results[0].plot()
-                
-                # 감지 결과 저장
-                detections = self._parse_detections(results[0])
+                annotated_frame = result.plot()
+                detections = self._parse_detections(result)
+
                 if detections:
-                    detection_history.append({
-                        'frame': frame_count,
-                        'time': frame_count / fps,
-                        'detections': detections
-                    })
-                
-                # 출력 비디오에 저장
-                if output_path:
+                    detection_frames += 1
+                    detections_total += len(detections)
+                    if detection_history is not None:
+                        detection_history.append({
+                            'frame': frame_count,
+                            'time': frame_count / fps,
+                            'detections': detections,
+                        })
+
+                if out is not None:
                     out.write(annotated_frame)
-                
-                # 실시간 표시
+
                 if show_live:
                     cv2.imshow('Fire & Smoke Detection', annotated_frame)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                
-                # 진행률 표시
-                if frame_count % 30 == 0:
+
+                if total_frames > 0 and frame_count % 30 == 0:
                     progress = (frame_count / total_frames) * 100
-                    print(f"진행률: {progress:.1f}% ({frame_count}/{total_frames})")
-            
-            # 정리
-            cap.release()
-            if output_path:
-                out.release()
-            cv2.destroyAllWindows()
-            
-            print(f"✅ 비디오 처리 완료! 총 {len(detection_history)}개 프레임에서 감지")
-            
+                    logger.info(f"진행률: {progress:.1f}% ({frame_count}/{total_frames})")
+
+            logger.info(f"✅ 비디오 처리 완료! 감지 프레임 {detection_frames}개 / "
+                  f"총 객체 {detections_total}개")
+
             return {
                 'total_frames': total_frames,
                 'processed_frames': frame_count,
+                'detection_frames': detection_frames,
+                'detections_total': detections_total,
                 'detection_history': detection_history,
-                'output_path': output_path
+                'output_path': output_path,
             }
-            
+
         except Exception as e:
-            print(f"❌ 비디오 추론 실패: {e}")
+            logger.info(f"❌ 비디오 추론 실패: {e}")
             return None
+        finally:
+            if out is not None:
+                out.release()
+            cv2.destroyAllWindows()
     
     def real_time_detection(self, camera_index=0, save_video=False, output_path='real_time_detection.mp4'):
         """실시간 웹캠 감지"""
         if self.model is None:
-            print("❌ 모델이 로드되지 않았습니다.")
+            logger.info("❌ 모델이 로드되지 않았습니다.")
             return None
         
-        print("=== 실시간 화재/연기 감지 시작 ===")
-        print("종료하려면 'q' 키를 누르세요.")
+        logger.info("=== 실시간 화재/연기 감지 시작 ===")
+        logger.info("종료하려면 'q' 키를 누르세요.")
         
         try:
             cap = cv2.VideoCapture(camera_index)
             
             if not cap.isOpened():
-                print("❌ 카메라를 열 수 없습니다.")
+                logger.info("❌ 카메라를 열 수 없습니다.")
                 return None
             
             # 카메라 설정
@@ -296,20 +304,22 @@ class InferenceEngine:
             detection_count = 0
             fps_counter = 0
             start_time = time.time()
-            
+            elapsed_time = 0.0
+
             while True:
                 ret, frame = cap.read()
                 if not ret:
-                    print("프레임을 읽을 수 없습니다.")
+                    logger.info("프레임을 읽을 수 없습니다.")
                     break
-                
+
                 fps_counter += 1
-                
+
                 # 추론 실행
                 results = self.model.predict(
                     source=frame,
                     conf=self.confidence,
                     iou=self.iou_threshold,
+                    device=self.device,
                     verbose=False
                 )
                 
@@ -352,8 +362,9 @@ class InferenceEngine:
                 out.release()
             cv2.destroyAllWindows()
             
-            print(f"✅ 실시간 감지 종료. 총 {detection_count}개 객체 감지")
-            
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ 실시간 감지 종료. 총 {detection_count}개 객체 감지")
+
             return {
                 'total_detections': detection_count,
                 'duration': elapsed_time,
@@ -361,7 +372,7 @@ class InferenceEngine:
             }
             
         except Exception as e:
-            print(f"❌ 실시간 감지 실패: {e}")
+            logger.info(f"❌ 실시간 감지 실패: {e}")
             return None
     
     def _parse_detections(self, result):
@@ -393,10 +404,10 @@ class InferenceEngine:
     def _print_detection_results(self, detections):
         """감지 결과 출력"""
         if not detections:
-            print("❌ 감지된 객체 없음")
+            logger.info("❌ 감지된 객체 없음")
             return
         
-        print(f"✅ {len(detections)}개 객체 감지:")
+        logger.info(f"✅ {len(detections)}개 객체 감지:")
         
         class_counts = {}
         for detection in detections:
@@ -407,14 +418,14 @@ class InferenceEngine:
                 class_counts[class_name] = []
             class_counts[class_name].append(confidence)
             
-            print(f"  - {class_name}: {confidence:.3f}")
+            logger.info(f"  - {class_name}: {confidence:.3f}")
         
         # 클래스별 요약
-        print("\n📊 클래스별 요약:")
+        logger.info("\n📊 클래스별 요약:")
         for class_name, confidences in class_counts.items():
             avg_conf = np.mean(confidences)
             max_conf = np.max(confidences)
-            print(f"  {class_name}: {len(confidences)}개 (평균: {avg_conf:.3f}, 최대: {max_conf:.3f})")
+            logger.info(f"  {class_name}: {len(confidences)}개 (평균: {avg_conf:.3f}, 최대: {max_conf:.3f})")
     
     def _print_batch_summary(self, batch_results):
         """배치 결과 요약"""
@@ -422,11 +433,11 @@ class InferenceEngine:
         images_with_detections = sum(1 for r in batch_results if r['detections'])
         total_detections = sum(len(r['detections']) for r in batch_results)
         
-        print(f"\n=== 배치 처리 요약 ===")
-        print(f"총 이미지: {total_images}개")
-        print(f"감지된 이미지: {images_with_detections}개")
-        print(f"총 감지 객체: {total_detections}개")
-        print(f"감지율: {images_with_detections/total_images*100:.1f}%")
+        logger.info(f"\n=== 배치 처리 요약 ===")
+        logger.info(f"총 이미지: {total_images}개")
+        logger.info(f"감지된 이미지: {images_with_detections}개")
+        logger.info(f"총 감지 객체: {total_detections}개")
+        logger.info(f"감지율: {images_with_detections/total_images*100:.1f}%")
         
         # 클래스별 통계
         class_stats = {}
@@ -438,11 +449,11 @@ class InferenceEngine:
                 class_stats[class_name].append(detection['confidence'])
         
         if class_stats:
-            print(f"\n📊 클래스별 통계:")
+            logger.info(f"\n📊 클래스별 통계:")
             for class_name, confidences in class_stats.items():
                 count = len(confidences)
                 avg_conf = np.mean(confidences)
-                print(f"  {class_name}: {count}개 (평균 신뢰도: {avg_conf:.3f})")
+                logger.info(f"  {class_name}: {count}개 (평균 신뢰도: {avg_conf:.3f})")
     
     def _visualize_result(self, result, image_path):
         """결과 시각화"""
@@ -471,22 +482,22 @@ class InferenceEngine:
             plt.show()
             
         except Exception as e:
-            print(f"시각화 실패: {e}")
+            logger.info(f"시각화 실패: {e}")
     
     def set_confidence_threshold(self, confidence):
         """신뢰도 임계값 설정"""
         self.confidence = confidence
-        print(f"신뢰도 임계값 변경: {confidence}")
+        logger.info(f"신뢰도 임계값 변경: {confidence}")
     
     def set_iou_threshold(self, iou_threshold):
         """IoU 임계값 설정"""
         self.iou_threshold = iou_threshold
-        print(f"IoU 임계값 변경: {iou_threshold}")
+        logger.info(f"IoU 임계값 변경: {iou_threshold}")
     
     def get_model_info(self):
         """모델 정보 조회"""
         if self.model is None:
-            print("모델이 로드되지 않았습니다.")
+            logger.info("모델이 로드되지 않았습니다.")
             return None
         
         info = {
@@ -497,9 +508,9 @@ class InferenceEngine:
             'device': next(self.model.model.parameters()).device if self.model else 'unknown'
         }
         
-        print("=== 모델 정보 ===")
+        logger.info("=== 모델 정보 ===")
         for key, value in info.items():
-            print(f"{key}: {value}")
+            logger.info(f"{key}: {value}")
         
         return info
 
@@ -510,15 +521,16 @@ def main():
     
     # 모델 로드
     if engine.load_model():
-        print("추론 엔진 준비 완료!")
-        print("\n사용 가능한 기능:")
-        print("- engine.predict_image('이미지경로'): 단일 이미지 추론")
-        print("- engine.predict_batch('폴더경로'): 배치 추론")
-        print("- engine.predict_video('비디오경로'): 비디오 추론")
-        print("- engine.real_time_detection(): 실시간 감지")
+        logger.info("추론 엔진 준비 완료!")
+        logger.info("\n사용 가능한 기능:")
+        logger.info("- engine.predict_image('이미지경로'): 단일 이미지 추론")
+        logger.info("- engine.predict_batch('폴더경로'): 배치 추론")
+        logger.info("- engine.predict_video('비디오경로'): 비디오 추론")
+        logger.info("- engine.real_time_detection(): 실시간 감지")
         
         # 모델 정보 출력
         engine.get_model_info()
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()

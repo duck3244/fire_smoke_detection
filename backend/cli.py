@@ -6,6 +6,7 @@ YOLOv8 화재 및 연기 감지 프로젝트 메인 실행 파일
 
 import os
 import sys
+import logging
 import argparse
 from pathlib import Path
 
@@ -16,6 +17,9 @@ from model_trainer import ModelTrainer
 from model_validator import ModelValidator
 from inference_engine import InferenceEngine
 from visualization_utils import VisualizationUtils
+
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
 
 
 class FireSmokeDetectionPipeline:
@@ -29,16 +33,16 @@ class FireSmokeDetectionPipeline:
         self.inference_engine = None
         self.visualizer = VisualizationUtils()
 
-        print("🔥 YOLOv8 화재 및 연기 감지 시스템 초기화 완료")
+        logger.info("🔥 YOLOv8 화재 및 연기 감지 시스템 초기화 완료")
 
     def setup_environment(self):
         """환경 설정"""
-        print("\n=== 1. 환경 설정 ===")
+        logger.info("\n=== 1. 환경 설정 ===")
         return initialize_project()
 
     def prepare_dataset(self):
         """데이터셋 준비 및 검증"""
-        print("\n=== 2. 데이터셋 준비 ===")
+        logger.info("\n=== 2. 데이터셋 준비 ===")
 
         # 디렉토리 구조 생성
         self.dataset_manager.create_directory_structure()
@@ -47,7 +51,7 @@ class FireSmokeDetectionPipeline:
         status = self.dataset_manager.check_dataset_status()
 
         if status['has_data']:
-            print("✅ 데이터셋 발견!")
+            logger.info("✅ 데이터셋 발견!")
 
             # 데이터셋 검증
             is_valid = self.dataset_manager.validate_dataset_format()
@@ -61,21 +65,21 @@ class FireSmokeDetectionPipeline:
 
                 return True
             else:
-                print("❌ 데이터셋 형식에 문제가 있습니다.")
+                logger.info("❌ 데이터셋 형식에 문제가 있습니다.")
                 return False
         else:
-            print("❌ 데이터셋이 없습니다. 데이터를 업로드해주세요.")
+            logger.info("❌ 데이터셋이 없습니다. 데이터를 업로드해주세요.")
             return False
 
     def train_model(self, epochs=100, batch_size=16, model_size='yolov8n.pt'):
         """모델 훈련"""
-        print(f"\n=== 3. 모델 훈련 ({epochs} epochs) ===")
+        logger.info(f"\n=== 3. 모델 훈련 ({epochs} epochs) ===")
 
         # 훈련기 초기화
         self.trainer = ModelTrainer(model_size)
 
         if not self.trainer.load_model():
-            print("❌ 모델 로드 실패")
+            logger.info("❌ 모델 로드 실패")
             return False
 
         # 모델 정보 출력
@@ -89,32 +93,32 @@ class FireSmokeDetectionPipeline:
         )
 
         if results:
-            print("✅ 모델 훈련 완료!")
+            logger.info("✅ 모델 훈련 완료!")
 
             # 훈련 결과 시각화
             self.visualizer.plot_training_results()
 
             return True
         else:
-            print("❌ 모델 훈련 실패")
+            logger.info("❌ 모델 훈련 실패")
             return False
 
     def validate_model(self):
         """모델 검증"""
-        print("\n=== 4. 모델 검증 ===")
+        logger.info("\n=== 4. 모델 검증 ===")
 
         # 검증기 초기화
         self.validator = ModelValidator()
 
         if not self.validator.load_model():
-            print("❌ 모델 로드 실패")
+            logger.info("❌ 모델 로드 실패")
             return False
 
         # 검증 실행
         results = self.validator.validate()
 
         if results:
-            print("✅ 모델 검증 완료!")
+            logger.info("✅ 모델 검증 완료!")
 
             # 혼동 행렬 분석
             self.validator.confusion_matrix_analysis()
@@ -130,18 +134,18 @@ class FireSmokeDetectionPipeline:
 
             return True
         else:
-            print("❌ 모델 검증 실패")
+            logger.info("❌ 모델 검증 실패")
             return False
 
     def run_inference(self, source, inference_type='image'):
         """추론 실행"""
-        print(f"\n=== 5. 추론 실행 ({inference_type}) ===")
+        logger.info(f"\n=== 5. 추론 실행 ({inference_type}) ===")
 
         # 추론 엔진 초기화
         self.inference_engine = InferenceEngine()
 
         if not self.inference_engine.load_model():
-            print("❌ 모델 로드 실패")
+            logger.info("❌ 모델 로드 실패")
             return False
 
         try:
@@ -163,157 +167,156 @@ class FireSmokeDetectionPipeline:
                 results = self.inference_engine.real_time_detection()
 
             else:
-                print(f"❌ 지원하지 않는 추론 타입: {inference_type}")
+                logger.info(f"❌ 지원하지 않는 추론 타입: {inference_type}")
                 return False
 
             if results:
-                print("✅ 추론 완료!")
+                logger.info("✅ 추론 완료!")
                 return True
             else:
-                print("❌ 추론 실패")
+                logger.info("❌ 추론 실패")
                 return False
 
         except Exception as e:
-            print(f"❌ 추론 중 오류 발생: {e}")
+            logger.info(f"❌ 추론 중 오류 발생: {e}")
             return False
 
-    def run_full_pipeline(self, epochs=50, batch_size=16, download_option='quick', api_key=None):
+    def run_full_pipeline(self, epochs=50, batch_size=16):
         """전체 파이프라인 실행"""
-        print("🚀 전체 파이프라인 실행 시작!")
+        logger.info("🚀 전체 파이프라인 실행 시작!")
 
         # 1. 환경 설정
         setup_result = self.setup_environment()
         if not setup_result['ultralytics_ok']:
-            print("❌ 환경 설정 실패")
+            logger.info("❌ 환경 설정 실패")
             return False
 
         # 2. 데이터셋 준비 (Roboflow 다운로드 포함)
         if not self.prepare_dataset():
-            print("❌ 데이터셋 준비 실패")
+            logger.info("❌ 데이터셋 준비 실패")
             return False
 
         # 3. 모델 훈련
         if not self.train_model(epochs=epochs, batch_size=batch_size):
-            print("❌ 모델 훈련 실패")
+            logger.info("❌ 모델 훈련 실패")
             return False
 
         # 4. 모델 검증
         if not self.validate_model():
-            print("❌ 모델 검증 실패")
+            logger.info("❌ 모델 검증 실패")
             return False
 
-        print("🎉 전체 파이프라인 실행 완료!")
+        logger.info("🎉 전체 파이프라인 실행 완료!")
         return True
 
-def export_model(self, format='onnx'):
-    """대화형 모드"""
-    print("\n🤖 대화형 모드 시작")
-    print("사용 가능한 명령어:")
-    print("1. setup - 환경 설정")
-    print("2. dataset - 데이터셋 준비")
-    print("3. train - 모델 훈련")
-    print("4. validate - 모델 검증")
-    print("5. infer - 추론 실행")
-    print("6. viz - 시각화")
-    print("7. full - 전체 파이프라인")
-    print("8. quit - 종료")
+    def interactive_mode(self):
+        """대화형 모드"""
+        logger.info("\n🤖 대화형 모드 시작")
+        logger.info("사용 가능한 명령어:")
+        logger.info("1. setup - 환경 설정")
+        logger.info("2. dataset - 데이터셋 준비")
+        logger.info("3. train - 모델 훈련")
+        logger.info("4. validate - 모델 검증")
+        logger.info("5. infer - 추론 실행")
+        logger.info("6. viz - 시각화")
+        logger.info("7. full - 전체 파이프라인")
+        logger.info("8. quit - 종료")
 
-    while True:
-        try:
-            command = input("\n명령어를 입력하세요: ").strip().lower()
+        while True:
+            try:
+                command = input("\n명령어를 입력하세요: ").strip().lower()
 
-            if command == '1' or command == 'setup':
-                self.setup_environment()
+                if command == '1' or command == 'setup':
+                    self.setup_environment()
 
-            elif command == '2' or command == 'dataset':
-                self.prepare_dataset()
+                elif command == '2' or command == 'dataset':
+                    self.prepare_dataset()
 
-            elif command == '3' or command == 'train':
-                epochs = input("에포크 수 (기본값: 50): ").strip()
-                epochs = int(epochs) if epochs else 50
+                elif command == '3' or command == 'train':
+                    epochs = input("에포크 수 (기본값: 50): ").strip()
+                    epochs = int(epochs) if epochs else 50
 
-                batch_size = input("배치 크기 (기본값: 16): ").strip()
-                batch_size = int(batch_size) if batch_size else 16
+                    batch_size = input("배치 크기 (기본값: 16): ").strip()
+                    batch_size = int(batch_size) if batch_size else 16
 
-                self.train_model(epochs=epochs, batch_size=batch_size)
+                    self.train_model(epochs=epochs, batch_size=batch_size)
 
-            elif command == '4' or command == 'validate':
-                self.validate_model()
+                elif command == '4' or command == 'validate':
+                    self.validate_model()
 
-            elif command == '5' or command == 'infer':
-                print("추론 타입을 선택하세요:")
-                print("1. image - 단일 이미지")
-                print("2. batch - 배치 이미지")
-                print("3. video - 비디오")
-                print("4. realtime - 실시간")
+                elif command == '5' or command == 'infer':
+                    logger.info("추론 타입을 선택하세요:")
+                    logger.info("1. image - 단일 이미지")
+                    logger.info("2. batch - 배치 이미지")
+                    logger.info("3. video - 비디오")
+                    logger.info("4. realtime - 실시간")
 
-                infer_type = input("선택 (1-4): ").strip()
+                    infer_type = input("선택 (1-4): ").strip()
 
-                if infer_type == '1':
-                    image_path = input("이미지 경로: ").strip()
-                    self.run_inference(image_path, 'image')
-                elif infer_type == '2':
-                    folder_path = input("폴더 경로: ").strip()
-                    self.run_inference(folder_path, 'batch')
-                elif infer_type == '3':
-                    video_path = input("비디오 경로: ").strip()
-                    self.run_inference(video_path, 'video')
-                elif infer_type == '4':
-                    self.run_inference(None, 'realtime')
+                    if infer_type == '1':
+                        image_path = input("이미지 경로: ").strip()
+                        self.run_inference(image_path, 'image')
+                    elif infer_type == '2':
+                        folder_path = input("폴더 경로: ").strip()
+                        self.run_inference(folder_path, 'batch')
+                    elif infer_type == '3':
+                        video_path = input("비디오 경로: ").strip()
+                        self.run_inference(video_path, 'video')
+                    elif infer_type == '4':
+                        self.run_inference(None, 'realtime')
 
-            elif command == '6' or command == 'viz':
-                print("시각화 옵션:")
-                print("1. 훈련 결과")
-                print("2. 검증 샘플")
-                print("3. 클래스 분포")
-                print("4. 감지 샘플")
+                elif command == '6' or command == 'viz':
+                    logger.info("시각화 옵션:")
+                    logger.info("1. 훈련 결과")
+                    logger.info("2. 검증 샘플")
+                    logger.info("3. 클래스 분포")
+                    logger.info("4. 감지 샘플")
 
-                viz_option = input("선택 (1-4): ").strip()
+                    viz_option = input("선택 (1-4): ").strip()
 
-                if viz_option == '1':
-                    self.visualizer.plot_training_results()
-                elif viz_option == '2':
-                    self.visualizer.plot_validation_samples()
-                elif viz_option == '3':
-                    self.visualizer.plot_class_distribution()
-                elif viz_option == '4':
-                    self.visualizer.plot_detection_samples()
+                    if viz_option == '1':
+                        self.visualizer.plot_training_results()
+                    elif viz_option == '2':
+                        self.visualizer.plot_validation_samples()
+                    elif viz_option == '3':
+                        self.visualizer.plot_class_distribution()
+                    elif viz_option == '4':
+                        self.visualizer.plot_detection_samples()
 
-            elif command == '7' or command == 'full':
-                epochs = input("에포크 수 (기본값: 50): ").strip()
-                epochs = int(epochs) if epochs else 50
+                elif command == '7' or command == 'full':
+                    epochs = input("에포크 수 (기본값: 50): ").strip()
+                    epochs = int(epochs) if epochs else 50
 
-                self.run_full_pipeline(epochs=epochs)
+                    self.run_full_pipeline(epochs=epochs)
 
-            elif command == '8' or command == 'quit':
-                print("👋 프로그램을 종료합니다.")
+                elif command == '8' or command == 'quit':
+                    logger.info("👋 프로그램을 종료합니다.")
+                    break
+
+                else:
+                    logger.info("❌ 올바르지 않은 명령어입니다.")
+
+            except KeyboardInterrupt:
+                logger.info("\n👋 프로그램을 종료합니다.")
                 break
+            except Exception as e:
+                logger.info(f"❌ 오류 발생: {e}")
 
-            else:
-                print("❌ 올바르지 않은 명령어입니다.")
+    def export_model(self, format='onnx'):
+        """모델 내보내기"""
+        logger.info(f"\n=== 모델 내보내기 ({format}) ===")
 
-        except KeyboardInterrupt:
-            print("\n👋 프로그램을 종료합니다.")
-            break
-        except Exception as e:
-            print(f"❌ 오류 발생: {e}")
+        if self.trainer is None:
+            self.trainer = ModelTrainer()
 
+        export_path = self.trainer.export_model(format)
 
-def export_model(self, format='onnx'):
-    """모델 내보내기"""
-    print(f"\n=== 모델 내보내기 ({format}) ===")
-
-    if self.trainer is None:
-        self.trainer = ModelTrainer()
-
-    export_path = self.trainer.export_model(format)
-
-    if export_path:
-        print(f"✅ 모델 내보내기 완료: {export_path}")
-        return export_path
-    else:
-        print("❌ 모델 내보내기 실패")
-        return None
+        if export_path:
+            logger.info(f"✅ 모델 내보내기 완료: {export_path}")
+            return export_path
+        else:
+            logger.info("❌ 모델 내보내기 실패")
+            return None
 
 
 def create_argument_parser():
@@ -387,11 +390,11 @@ def main():
 
     elif args.mode == 'dataset':
         pipeline.setup_environment()
-        pipeline.prepare_dataset(download_option=args.download, api_key=args.api_key)
+        pipeline.prepare_dataset()
 
     elif args.mode == 'train':
         pipeline.setup_environment()
-        if pipeline.prepare_dataset(download_option=args.download, api_key=args.api_key):
+        if pipeline.prepare_dataset():
             pipeline.train_model(
                 epochs=args.epochs,
                 batch_size=args.batch_size,
@@ -403,7 +406,7 @@ def main():
 
     elif args.mode == 'infer':
         if not args.source:
-            print("❌ --source 인수가 필요합니다.")
+            logger.info("❌ --source 인수가 필요합니다.")
             sys.exit(1)
 
         pipeline.run_inference(args.source, args.inference_type)
@@ -411,9 +414,7 @@ def main():
     elif args.mode == 'full':
         pipeline.run_full_pipeline(
             epochs=args.epochs,
-            batch_size=args.batch_size,
-            download_option=args.download,
-            api_key=args.api_key
+            batch_size=args.batch_size
         )
 
     # 모델 내보내기
@@ -422,7 +423,7 @@ def main():
 
     # 모드가 지정되지 않은 경우 대화형 모드
     if not args.mode:
-        print("모드가 지정되지 않았습니다. 대화형 모드를 시작합니다.")
+        logger.info("모드가 지정되지 않았습니다. 대화형 모드를 시작합니다.")
         pipeline.interactive_mode()
 
 
@@ -430,7 +431,7 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n👋 프로그램이 중단되었습니다.")
+        logger.info("\n👋 프로그램이 중단되었습니다.")
     except Exception as e:
-        print(f"❌ 예상치 못한 오류: {e}")
+        logger.info(f"❌ 예상치 못한 오류: {e}")
         sys.exit(1)
